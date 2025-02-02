@@ -392,7 +392,7 @@ void vfile __P ((const char *format, ...));
 #define vchar(x) putc(x,stderr)
 #define vstring(x) fputs(x,stderr)
 
-#ifdef __GNUC__
+#if defined(__GNUC__) && !defined(__APPLE__)
 #if __GNUC__ > 1
 #define vstringf(format,args...) fprintf(stderr,format, ##args)
 #endif
