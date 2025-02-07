@@ -76,7 +76,7 @@ int Canseek=1; /* 1: can; 0: only rewind, -1: neither */
 static int zsendfile __P ((struct zm_fileinfo *zi, const char *buf, size_t blen));
 static int getnak __P ((void));
 static int wctxpn __P ((struct zm_fileinfo *));
-static int wcs __P ((const char *oname, const char *remotename));
+static int wcs __P ((const char *oname, const char *remotename, int user_provided_length));
 static size_t zfilbuf __P ((struct zm_fileinfo *zi));
 static size_t filbuf __P ((char *buf, size_t count));
 static int getzrxinit __P ((void));
@@ -185,6 +185,7 @@ int enable_timesync=0;
 size_t Lastsync;		/* Last offset to which we got a ZRPOS */
 int Beenhereb4;		/* How many times we've been ZRPOS'd same place */
 char *remote_filename = NULL;  // Used by --remote-nae (-F)
+int user_provided_length = 0;
 int no_timeout=FALSE;
 size_t max_blklen=1024;
 size_t start_blklen=0;
@@ -301,6 +302,7 @@ static struct option const long_options[] =
   {"tcp-client", required_argument, NULL, 7},
   {"no-unixmode", no_argument, NULL, 8},
   {"remote-name", required_argument, NULL, 'F'},
+  {"stream-length", required_argument, NULL, 'I'},
   {NULL, 0, NULL, 0}
 };
 
@@ -350,7 +352,7 @@ main(int argc, char **argv)
 	Rxtimeout = 600;
 
 	while ((c = getopt_long (argc, argv, 
-		"2+48abB:C:c:dfeEghHi:kL:l:m:M:NnOopRrqsSt:TUuvw:XYyF:",
+		"2+48abB:C:c:dfeEghHi:kL:l:m:M:NnOopRrqsSt:TUuvw:XYyF:I:",
 		long_options, (int *) 0))!=EOF)
 	{
 		unsigned long int tmp;
@@ -552,6 +554,13 @@ main(int argc, char **argv)
         	remote_filename = strdup(optarg);
 			if (!remote_filename) {
 				error(1, 0, _("out of memory"));
+			}
+			break;
+		case 'I': // Handle --stream-length
+			user_provided_length = strtol(optarg, NULL, 10);
+			if (user_provided_length <= 0) {
+				fprintf(stderr, "Invalid stream length: %s\n", optarg);
+				exit(1);
 			}
 			break;
 		case 2:
@@ -884,7 +893,7 @@ send_pseudo(const char *name, const char *data)
 		return 1;
 	}
 
-	if (wcs (tmp,name) == ERROR) {
+	if (wcs (tmp,name,0) == ERROR) {
 		if (Verbose)
 			vstringf (_ ("send_pseudo %s: failed"),name);
 		else {
@@ -927,7 +936,7 @@ wcsend (int argc, char *argp[])
 
 	for (n = 0; n < argc; ++n) {
 		Totsecs = 0;
-		if (wcs(argp[n], remote_filename) == ERROR)
+		if (wcs(argp[n], remote_filename, user_provided_length) == ERROR)
 			return ERROR;
 	}
 #if defined(ENABLE_TIMESYNC)
@@ -1000,7 +1009,7 @@ wcsend (int argc, char *argp[])
 }
 
 static int
-wcs(const char *oname, const char *remotename)
+wcs(const char *oname, const char *remotename, int user_provided_length)
 {
 #if !defined(S_ISDIR)
 	int c;
@@ -1123,9 +1132,9 @@ wcs(const char *oname, const char *remotename)
 	zi.modtime=f.st_mtime;
 	zi.mode=f.st_mode;
 #if defined(S_ISFIFO)
-	zi.bytes_total= (S_ISFIFO(f.st_mode)) ? DEFBYTL : f.st_size;
+	zi.bytes_total = S_ISFIFO(f.st_mode) ? (user_provided_length > 0 ? user_provided_length : DEFBYTL) : f.st_size;
 #else
-	zi.bytes_total= c == S_IFIFO ? DEFBYTL : f.st_size;
+	zi.bytes_total = c == S_ISFIFO ? (user_provided_length > 0 ? user_provided_length : DEFBYTL) : f.st_size;
 #endif
 	zi.bytes_sent=0;
 	zi.bytes_received=0;
@@ -1242,11 +1251,18 @@ wctxpn(struct zm_fileinfo *zi)
 	/* note that we may lose some information here in case mode_t is wider than an 
 	 * int. But i believe sending %lo instead of %o _could_ break compatability
 	 */
-	if (!Ascii && (input_f!=stdin) && *zi->fname && fstat(fileno(input_f), &f)!= -1)
-		sprintf(p, "%lu %lo %o 0 %d %ld", (long) f.st_size, f.st_mtime,
-		  (unsigned int)((no_unixmode) ? 0 : f.st_mode), 
-		  Filesleft, Totalleft);
-	if (Verbose)
+	  if (!Ascii) {
+		long size = (input_f == stdin || S_ISFIFO(f.st_mode))
+			? ((user_provided_length > 0) ? user_provided_length : DEFBYTL)
+			: (fstat(fileno(input_f), &f) != -1 ? f.st_size : 0);
+
+		sprintf(p, "%lu %lo %o 0 %d %ld",
+			size,
+			f.st_mtime,
+			(unsigned int)((no_unixmode) ? 0 : f.st_mode),
+			Filesleft, Totalleft);
+	  }
+	  if (Verbose)
 		vstringf(_("Sending: %s\n"),txbuf);
 	Totalleft -= f.st_size;
 	if (--Filesleft <= 0)
@@ -1561,6 +1577,7 @@ usage(int exitcode, const char *what)
 "  -E, --rename                force receiver to rename files it already has\n"
 "  -f, --full-path             send full pathname (Y/Z)\n"
 "  -F, --remote-name NAME      set the remote filename\n"
+"  -I, --stream-length=N   Specify expected byte length for streaming input (stdin)\n"
 "  -i, --immediate-command CMD send remote CMD, return immediately (Z)\n"
 "  -h, --help                  print this usage message\n"
 "  -k, --1k                    send 1024 byte packets (X)\n"
