@@ -184,7 +184,7 @@ int Exitcode;
 int enable_timesync=0;
 size_t Lastsync;		/* Last offset to which we got a ZRPOS */
 int Beenhereb4;		/* How many times we've been ZRPOS'd same place */
-
+char *remote_filename = NULL;  // Used by --remote-nae (-F)
 int no_timeout=FALSE;
 size_t max_blklen=1024;
 size_t start_blklen=0;
@@ -300,6 +300,7 @@ static struct option const long_options[] =
   {"tcp-server", no_argument, NULL, 6},
   {"tcp-client", required_argument, NULL, 7},
   {"no-unixmode", no_argument, NULL, 8},
+  {"remote-name", required_argument, NULL, 'F'},
   {NULL, 0, NULL, 0}
 };
 
@@ -349,7 +350,7 @@ main(int argc, char **argv)
 	Rxtimeout = 600;
 
 	while ((c = getopt_long (argc, argv, 
-		"2+48abB:C:c:dfeEghHi:kL:l:m:M:NnOopRrqsSt:TUuvw:XYy",
+		"2+48abB:C:c:dfeEghHi:kL:l:m:M:NnOopRrqsSt:TUuvw:XYyF:",
 		long_options, (int *) 0))!=EOF)
 	{
 		unsigned long int tmp;
@@ -547,6 +548,12 @@ main(int argc, char **argv)
 			/* **** FALLL THROUGH TO **** */
 		case 'y':
 			Lzmanag = ZF1_ZMCLOB; break;
+        case 'F':
+        	remote_filename = strdup(optarg);
+			if (!remote_filename) {
+				error(1, 0, _("out of memory"));
+			}
+			break;
 		case 2:
 #ifdef ENABLE_SYSLOG
 #  ifndef ENABLE_SYSLOG_FORCE
@@ -920,7 +927,7 @@ wcsend (int argc, char *argp[])
 
 	for (n = 0; n < argc; ++n) {
 		Totsecs = 0;
-		if (wcs (argp[n],NULL) == ERROR)
+		if (wcs(argp[n], remote_filename) == ERROR)
 			return ERROR;
 	}
 #if defined(ENABLE_TIMESYNC)
@@ -1553,6 +1560,7 @@ usage(int exitcode, const char *what)
 "  -e, --escape                escape all control characters (Z)\n"
 "  -E, --rename                force receiver to rename files it already has\n"
 "  -f, --full-path             send full pathname (Y/Z)\n"
+"  -F, --remote-name NAME      set the remote filename\n"
 "  -i, --immediate-command CMD send remote CMD, return immediately (Z)\n"
 "  -h, --help                  print this usage message\n"
 "  -k, --1k                    send 1024 byte packets (X)\n"
